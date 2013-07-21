@@ -23,6 +23,16 @@
 #include <QFrame>
 #include <QTimer>
 
+#include "compat/compat.h"
+
+#define MAX_BLOBS 10
+
+struct BlobMapping {
+    int blob_count;
+    int x_coords[MAX_BLOBS];
+    int y_coords[MAX_BLOBS];
+};
+
 //-----------------------------------------------------------------------------
 class Tracker : public QThread, public ITracker
 {
@@ -88,6 +98,9 @@ protected:
     volatile bool should_quit;
     volatile bool fresh;
     QTimer timer;
+    
+    PortableLockedShm shm;
+    BlobMapping* blob_shm;
     
 protected slots:
     void paint_widget();

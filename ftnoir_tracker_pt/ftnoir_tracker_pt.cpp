@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QCoreApplication>
 #include "facetracknoir/global-settings.h"
+#include <algorithm>
 
 using namespace std;
 using namespace cv;
@@ -20,13 +21,15 @@ using namespace cv;
 
 //-----------------------------------------------------------------------------
 Tracker::Tracker()
-    : tracking_valid(false), frame_count(0), commands(0), video_widget(NULL), fresh(false)
+    : tracking_valid(false), frame_count(0), commands(0), video_widget(NULL), fresh(false),
+      shm("pt-blob-info", "pt-blob-mutex", sizeof(BlobMapping))
 {
     should_quit = false;
 	qDebug()<<"Tracker::Tracker";
 	TrackerSettings settings;
     settings.load_ini();
 	apply(settings);
+    blob_shm = (BlobMapping*) shm.mem;
 }
 
 Tracker::~Tracker()
@@ -80,7 +83,20 @@ void Tracker::run()
 			if (new_frame && !frame.empty())
 			{
 				const std::vector<cv::Vec2f>& points = point_extractor.extract_points(frame, dt, draw_frame);
+                shm.lock();
+                int cnt = std::min<int>(points.size(), MAX_BLOBS);
+                blob_shm->blob_count = cnt;
+                for (int i = 0; i < cnt; i++)
+                {
+                    blob_shm->x_coords[i] = points[i][0];
+                    blob_shm->y_coords[i] = points[i][1];
+                }
+                shm.unlock();
+#if 0
+                /* sleep is irrelevant, frame retrieval blocks already */
+                
 				tracking_valid = point_tracker.track(points, camera.get_info().f, dt);
+#endif
 				frame_count++;
                 fresh = true;
 			}

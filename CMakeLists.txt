@@ -425,7 +425,7 @@ endif()
 
     if(OpenCV_FOUND)
         add_library(opentrack-tracker-pt SHARED ${opentrack-tracker-pt-c} ${opentrack-tracker-pt-moc} ${opentrack-tracker-pt-uih} ${opentrack-tracker-pt-rcc})
-        target_link_libraries(opentrack-tracker-pt ${MY_QT_LIBS} ${OpenCV_LIBS})
+        target_link_libraries(opentrack-tracker-pt ${MY_QT_LIBS} ${OpenCV_LIBS} opentrack-compat)
         if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_COMPILER_IS_GNUCC)
         SET_TARGET_PROPERTIES(opentrack-tracker-pt
                 PROPERTIES LINK_FLAGS "-Wl,--version-script=${CMAKE_SOURCE_DIR}/facetracknoir/posix-version-script.txt")
