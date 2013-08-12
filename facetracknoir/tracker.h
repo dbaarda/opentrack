@@ -1,29 +1,26 @@
-/********************************************************************************
-* FaceTrackNoIR		This program is a private project of the some enthusiastic	*
-*					gamers from Holland, who don't like to pay much for			*
-*					head-tracking.												*
-*																				*
-* Copyright (C) 2010 - 2012	Wim Vriend (Developing)								*
-*							Ron Hendriks (Researching and Testing)				*
-*																				*
-* Homepage																		*																				*
-* This program is free software; you can redistribute it and/or modify it		*
-* under the terms of the GNU General Public License as published by the			*
-* Free Software Foundation; either version 3 of the License, or (at your		*
-* option) any later version.													*
-*																				*
-* This program is distributed in the hope that it will be useful, but			*
-* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY	*
-* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for	*
-* more details.																	*
-*																				*
-* You should have received a copy of the GNU General Public License along		*
-* with this program; if not, see <http://www.gnu.org/licenses/>.				*
-*********************************************************************************/
-/*
-	Modifications (last one on top):
-		20120717 - WVR: FunctionConfig is now used for the Curves, instead of BezierConfig.
-*/
+/*******************************************************************************
+* FaceTrackNoIR    This program is a private project of the some enthusiastic  *
+*                  gamers from Holland, who don't like to pay much for         *
+*                  head-tracking.                                              *
+*                                                                              *
+* Copyright (C) 2010-2012  Wim Vriend (Developing)                             *
+*                          Ron Hendriks (Researching and Testing)              *
+*                                                                              *
+* Homepage                                                                     *
+*                                                                              *
+* This program is free software; you can redistribute it and/or modify it      *
+* under the terms of the GNU General Public License as published by the        *
+* Free Software Foundation; either version 3 of the License, or (at your       *
+* option) any later version.                                                   *
+*                                                                              *
+* This program is distributed in the hope that it will be useful, but          *
+* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY   *
+* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for  *
+* more details.                                                                *
+*                                                                              *
+* You should have received a copy of the GNU General Public License along      *
+* with this program; if not, see <http://www.gnu.org/licenses/>.               *
+*******************************************************************************/
 #ifndef __TRACKER_H__
 #define __TRACKER_H__
 
@@ -57,7 +54,7 @@
 #include "ftnoir_filter_base/ftnoir_filter_base.h"
 #include "tracker_types.h"
 
-class FaceTrackNoIR;				// pre-define parent-class to avoid circular includes
+class FaceTrackNoIR;  // pre-define parent-class to avoid circular includes
 
 //
 // Structure to hold all variables concerning one of 6 DOF's
@@ -86,8 +83,10 @@ public:
         invert(1),
         zero(0)
     {
-        QSettings settings("opentrack");							// Registry settings (in HK_USER)
-        QString currentFile = settings.value ( "SettingsFile", QCoreApplication::applicationDirPath() + "/Settings/default.ini" ).toString();
+        QSettings settings("opentrack");  // Registry settings (in HK_USER)
+        QString currentFile = settings.value(
+            "SettingsFile", 
+            QCoreApplication::applicationDirPath() + "/Settings/default.ini").toString();
         QSettings iniFile( currentFile, QSettings::IniFormat );
         curve.loadSettings(iniFile);
         curveAlt.loadSettings(iniFile);
@@ -96,41 +95,41 @@ public:
         altp = iniFile.value(secondary).toBool();
         iniFile.endGroup();
     }
-	double headPos;					// Current position (from faceTracker, radials or meters)
-    float invert;					// Invert measured value (= 1.0f or -1.0f)
-	FunctionConfig curve;		// Function to translate input -> output
-	FunctionConfig curveAlt;
+    double headPos;  // Current position (from faceTracker, radials or meters)
+    float invert;  // Invert measured value (= 1.0f or -1.0f)
+    FunctionConfig curve;  // Function to translate input -> output
+    FunctionConfig curveAlt;
     bool altp;
     double zero;
 };
 
 class Tracker : public QThread {
-	Q_OBJECT
+    Q_OBJECT
 
 private:
     FaceTrackNoIR *mainApp;
     QMutex mtx;
 
 protected:
-	// qthread override run method 
-	void run();
+    // qthread override run method 
+    void run();
 
 public:
-	Tracker( FaceTrackNoIR *parent );
+    Tracker( FaceTrackNoIR *parent );
     ~Tracker();
-	void loadSettings();							// Load settings from the INI-file
+    void loadSettings();  // Load settings from the INI-file
     bool getTrackingActive() { return confid; }
 
     void setInvertAxis(Axis axis, bool invert);
 
-    void getHeadPose(double *data);				// Return the current headpose data
-    void getOutputHeadPose(double *data);			// Return the current (processed) headpose data
+    void getHeadPose(double *data);  // Return the current headpose data
+    void getOutputHeadPose(double *data);  // Return the current (processed) headpose data
 
     volatile bool should_quit;
     // following are now protected by hTrackMutex
-    volatile bool do_center;							// Center head-position, using the shortkey
+    volatile bool do_center;  // Center head-position, using the shortkey
     // Flags to start/stop/reset tracking
-    volatile bool confid;                                // Tracker data is OK;
+    volatile bool confid;  // Tracker data is OK;
     
     T6DOF output_camera;
 };
