@@ -1,26 +1,26 @@
 /********************************************************************************
-* FaceTrackNoIR		This program is a private project of some enthusiastic		*
-*					gamers from Holland, who don't like to pay much for			*
-*					head-tracking.												*
-*																				*
-* Copyright (C) 2012	Wim Vriend (Developing)									*
-*						Ron Hendriks (Researching and Testing)					*
-*																				*
-* Homepage																		*
-*																				*
-* This program is free software; you can redistribute it and/or modify it		*
-* under the terms of the GNU General Public License as published by the			*
-* Free Software Foundation; either version 3 of the License, or (at your		*
-* option) any later version.													*
-*																				*
-* This program is distributed in the hope that it will be useful, but			*
-* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY	*
-* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for	*
-* more details.																	*
-*																				*
-* You should have received a copy of the GNU General Public License along		*
-* with this program; if not, see <http://www.gnu.org/licenses/>.				*
-*																				*
+* FaceTrackNoIR      This program is a private project of some enthusiastic     *
+*                    gamers from Holland, who don't like to pay much for        *
+*                    head-tracking.                                             *
+*                                                                               *
+* Copyright (C) 2012  Wim Vriend (Developing)                                   *
+*                     Ron Hendriks (Researching and Testing)                    *
+*                                                                               *
+* Homepage                                                                      *
+*                                                                               *
+* This program is free software; you can redistribute it and/or modify it       *
+* under the terms of the GNU General Public License as published by the         *
+* Free Software Foundation; either version 3 of the License, or (at your        *
+* option) any later version.                                                    *
+*                                                                               *
+* This program is distributed in the hope that it will be useful, but           *
+* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY    *
+* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for   *
+* more details.                                                                 *
+*                                                                               *
+* You should have received a copy of the GNU General Public License along       *
+* with this program; if not, see <http://www.gnu.org/licenses/>.                *
+*                                                                               *
 ********************************************************************************/
 #pragma once
 #ifndef INCLUDED_FTN_FILTER_H
@@ -30,34 +30,36 @@
 #include "facetracknoir/global-settings.h"
 #include "ui_ftnoir_ewma_filtercontrols.h"
 #include <QWidget>
+#include <QMutex>
+#include "facetracknoir/options.h"
+using namespace options;
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//
-// EWMA Filter: Exponentially Weighted Moving Average filter with dynamic smoothing parameter
-//
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+struct settings {
+    pbundle b;
+    value<int> kMinSmoothing, kMaxSmoothing, kSmoothingScaleCurve;
+    settings() :
+        b(bundle("ewma-filter")),
+        kMinSmoothing(b, "min-smoothing", 15),
+        kMaxSmoothing(b, "max-smoothing", 50),
+        kSmoothingScaleCurve(b, "smoothing-scale-curve", 10)
+    {}
+};
+
+
 class FTNoIR_Filter : public IFilter
 {
 public:
-	FTNoIR_Filter();
-    ~FTNoIR_Filter();
-    void Initialize() {}
-
-    void FilterHeadPoseData(double *current_camera_position, double *target_camera_position, double *new_camera_position, double *last_post_filter);
-
+    FTNoIR_Filter();
+    void reset() {}
+    void FilterHeadPoseData(const double *target_camera_position,
+                            double *new_camera_position);
+    void receiveSettings();
 private:
-	void loadSettings();									// Load the settings from the INI-file
-    double newHeadPose;								// Structure with new headpose
-
-	bool	first_run;
-    double	alpha_smoothing;
-    double	prev_alpha[6];
-    double	alpha[6];
-    double	smoothed_alpha[6];
-
-    double	kMinSmoothing;
-    double	kMaxSmoothing;
-    double	kSmoothingScaleCurve;
+    bool first_run;
+    double alpha_smoothing;
+    double alpha[6];
+    double current_camera_position[6];
+    settings s;
 };
 
 //*******************************************************************************************************
@@ -69,27 +71,19 @@ class FilterControls: public QWidget, public IFilterDialog
 {
     Q_OBJECT
 public:
-
-	explicit FilterControls();
-    virtual ~FilterControls();
-	void showEvent ( QShowEvent * event );
-    void Initialize(QWidget *parent, IFilter* ptr);
+    FilterControls();
+    void registerFilter(IFilter* flt);
+    void unregisterFilter();
 
 private:
-	Ui::UICFilterControls ui;
-	void loadSettings();
-	void save();
-
-	/** helper **/
-	bool settingsDirty;
-
-    IFilter* pFilter;										// If the filter was active when the dialog was opened, this will hold a pointer to the Filter instance
+    Ui::UICFilterControls ui;
+    void save();
+    settings s;
+    FTNoIR_Filter* pFilter;
 
 private slots:
-	void doOK();
-	void doCancel();
-	void settingChanged() { settingsDirty = true; };
-	void settingChanged( int ) { settingsDirty = true; };
+    void doOK();
+    void doCancel();
 };
 
 //*******************************************************************************************************
@@ -98,15 +92,11 @@ private slots:
 class FTNoIR_FilterDll : public Metadata
 {
 public:
-	FTNoIR_FilterDll();
-	~FTNoIR_FilterDll();
-	void getFullName(QString *strToBeFilled) { *strToBeFilled = QString("EWMA Filter Mk2"); }
-	void getShortName(QString *strToBeFilled) { *strToBeFilled = QString("EWMA"); }
-	void getDescription(QString *strToBeFilled) { *strToBeFilled = QString("Exponentially Weighted Moving Average filter with dynamic smoothing parameter"); }
-
-	void getIcon(QIcon *icon){ *icon = QIcon(":/images/filter-16.png");	}
+    void getFullName(QString *strToBeFilled) { *strToBeFilled = QString("EWMA Filter Mk2"); }
+    void getShortName(QString *strToBeFilled) { *strToBeFilled = QString("EWMA"); }
+    void getDescription(QString *strToBeFilled) { *strToBeFilled = QString("Exponentially Weighted Moving Average filter with dynamic smoothing parameter"); }
+    void getIcon(QIcon *icon){ *icon = QIcon(":/images/filter-16.png"); }
 };
 
-#endif						//INCLUDED_FTN_FILTER_H
+#endif  //INCLUDED_FTN_FILTER_H
 //END
-
