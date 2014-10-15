@@ -8,10 +8,10 @@
 #ifndef TRANSCALIB_H
 #define TRANSCALIB_H
 
-#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
 
 //-----------------------------------------------------------------------------
-// calibrates the translation from head to model = t_MH
+// Calibrates the translation from head to model = t_MH
 // by recursive least squares /
 // kalman filter in information form with identity noise covariance
 // measurement equation when head position = t_CH is fixed:
@@ -20,20 +20,20 @@
 class TranslationCalibrator
 {
 public:
-	TranslationCalibrator();
+    TranslationCalibrator();
 
-	// reset the calibration process
-	void reset();
+    // reset the calibration process
+    void reset();
 
-	// update the current estimate
-	void update(const cv::Matx33f& R_CM_k, const cv::Vec3f& t_CM_k);
+    // update the current estimate
+    void update(const cv::Matx33f& R_CM_k, const cv::Vec3f& t_CM_k);
 
-	// get the current estimate for t_MH
-	cv::Vec3f get_estimate();
+    // get the current estimate for t_MH
+    cv::Vec3f get_estimate();
 
-protected:
-	cv::Matx66f P;	// normalized precision matrix = inverse covariance
-	cv::Vec6f y;	// P*(-t_MH, t_CH)
+private:
+    cv::Matx66f P;	// normalized precision matrix = inverse covariance
+    cv::Vec6f y;	// P*(-t_MH, t_CH)
 };
 
 #endif //TRANSCALIB_H

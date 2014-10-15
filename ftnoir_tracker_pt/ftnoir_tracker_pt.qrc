@@ -1,10 +1,9 @@
 <RCC>
-  <qresource prefix="/">
-    <file>resources/icon.png</file>
-    <file>resources/cap_front.png</file>
-    <file>resources/cap_side.png</file>
-    <file>resources/clip_front.png</file>
-    <file>resources/clip_side.png</file>
-    <file>resources/logo_ir.png</file>
-  </qresource>
+    <qresource prefix="/">
+        <file>Resources/cap_front.png</file>
+        <file>Resources/cap_side.png</file>
+        <file>Resources/clip_front.png</file>
+        <file>Resources/clip_side.png</file>
+        <file>Resources/Logo_IR.png</file>
+    </qresource>
 </RCC>

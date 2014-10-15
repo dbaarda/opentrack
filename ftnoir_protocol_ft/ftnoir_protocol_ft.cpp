@@ -24,144 +24,55 @@
 * FTServer		FTServer is the Class, that communicates headpose-data			*
 *				to games, using the FreeTrackClient.dll.	         			*
 ********************************************************************************/
-/*
-	Modifications (last one on top):
-	20130209 - WVR: Some games support both interfaces and cause trouble. Added ComboBox to fix this (hide one interface 
-					by clearing the appropriate Registry-setting).
-	20130203 - WVR: Added Tirviews and dummy checkboxes to the Settings dialog. This is necessary for CFS3 etc.
-	20130125 - WVR: Upgraded to FT2.0: now the FreeTrack protocol supports all TIR-enabled games.
-	20110401 - WVR: Moved protocol to a DLL, convenient for installation etc.
-	20101224 - WVR: Base class is no longer inheriting QThread. sendHeadposeToGame
-					is called from run() of Tracker.cpp
-	20100601 - WVR: Added Mutex-bit in run(). Thought it wasn't so important (still do...). 
-	20100523 - WVR: Implemented the Freetrack-protocol just like Freetrack does. Earlier 
-					FaceTrackNoIR only worked with an adapted DLL, with a putdata function.
-					Now it works direcly in shared memory!
-*/
-#include <algorithm>
 #include "ftnoir_protocol_ft.h"
 #include "ftnoir_csv/csv.h"
 
-/** constructor **/
 FTNoIR_Protocol::FTNoIR_Protocol() :
-    shm(FT_MM_DATA, FREETRACK_MUTEX, sizeof(FTMemMap))
+    shm(FREETRACK_HEAP, FREETRACK_MUTEX, sizeof(FTHeap))
 {
-    pMemData = (FTMemMap*) shm.mem;
-	useTIRViews	= false;
-	useDummyExe	= false;
-    intUsedInterface = 0;
-	
-    loadSettings();
-
-	ProgramName = "";
-	intGameID = 0;
-
-	viewsStart = 0;
-	viewsStop = 0;
+    pMemData = (FTHeap*) shm.ptr();
+    ProgramName = "";
+    intGameID = 0;
+    viewsStart = 0;
+    viewsStop = 0;
 }
 
-/** destructor **/
 FTNoIR_Protocol::~FTNoIR_Protocol()
 {
-
-	qDebug()<< "~FTNoIR_Protocol: Destructor started.";
-
-	//
-	// Stop if started
-	//
-	if (viewsStop != NULL) {
-		qDebug()<< "~FTNoIR_Protocol: Stopping TIRViews.";
-		viewsStop();
-		FTIRViewsLib.unload();
-	}
+    if (viewsStop != NULL) {
+        viewsStop();
+        FTIRViewsLib.unload();
+    }
+    dummyTrackIR.terminate();
+    dummyTrackIR.kill();
+    dummyTrackIR.waitForFinished(50);
 }
 
-//
-// Read the game-data from CSV
-//
-
-
-//
-// Load the current Settings from the currently 'active' INI-file.
-//
-void FTNoIR_Protocol::loadSettings() {
-	QSettings settings("opentrack");	// Registry settings (in HK_USER)
-
-	QString currentFile = settings.value ( "SettingsFile", QCoreApplication::applicationDirPath() + "/Settings/default.ini" ).toString();
-	QSettings iniFile( currentFile, QSettings::IniFormat );		// Application settings (in INI-file)
-
-	iniFile.beginGroup ( "FT" );
-	intUsedInterface = iniFile.value ( "UsedInterface", 0 ).toInt();
-	iniFile.endGroup ();
-
-	//
-	// Use the settings-section from the deprecated fake-TIR protocol, as they are most likely to be found there.
-	//
-	iniFile.beginGroup ( "FTIR" );
-	useTIRViews	= iniFile.value ( "useTIRViews", 0 ).toBool();
-	useDummyExe	= iniFile.value ( "useDummyExe", 1 ).toBool();
-	iniFile.endGroup ();
-}
-
-//
-// Update Headpose in Game.
-//
-void FTNoIR_Protocol::sendHeadposeToGame(double *headpose, double *rawheadpose ) {
-float virtPosX;
-float virtPosY;
-float virtPosZ;
-
-float virtRotX;
-float virtRotY;
-float virtRotZ;
-
-float headPosX;
-float headPosY;
-float headPosZ;
-
-float headRotX;
-float headRotY;
-float headRotZ;
-
-    //
-	// Scale the Raw measurements to the client measurements.
-	//
-    headRotX = getRadsFromDegrees(rawheadpose[Pitch]);
-    headRotY = getRadsFromDegrees(rawheadpose[Yaw]);
-    headRotZ = getRadsFromDegrees(rawheadpose[Roll]);
-    headPosX = rawheadpose[TX] * 10;
-    headPosY = rawheadpose[TY] * 10;
-    headPosZ = rawheadpose[TZ] * 10;
-
-    virtRotX = getRadsFromDegrees(headpose[Pitch]);
-    virtRotY = getRadsFromDegrees(headpose[Yaw]);
-    virtRotZ = getRadsFromDegrees(headpose[Roll]);
-    virtPosX = headpose[TX] * 10;
-    virtPosY = headpose[TY] * 10;
-    virtPosZ = headpose[TZ] * 10;
+void FTNoIR_Protocol::sendHeadposeToGame(const double* headpose) {
+    float yaw = getRadsFromDegrees(headpose[Yaw]);
+    float pitch = getRadsFromDegrees(headpose[Pitch]);
+    float roll = getRadsFromDegrees(headpose[Roll]);
+    float tx = headpose[TX] * 10.f;
+    float ty = headpose[TY] * 10.f;
+    float tz = headpose[TZ] * 10.f;
 
     shm.lock();
     
-    pMemData->data.RawX = headPosX;
-    pMemData->data.RawY = headPosY;
-    pMemData->data.RawZ = headPosZ;
-    pMemData->data.RawPitch = headRotX;
-    pMemData->data.RawYaw = headRotY;
-    pMemData->data.RawRoll = headRotZ;
+    pMemData->data.RawX = 0;
+    pMemData->data.RawY = 0;
+    pMemData->data.RawZ = 0;
+    pMemData->data.RawPitch = 0;
+    pMemData->data.RawYaw = 0;
+    pMemData->data.RawRoll = 0;
 
-    //
-    //
-    pMemData->data.X = virtPosX;
-    pMemData->data.Y = virtPosY;
-    pMemData->data.Z = virtPosZ;
-    pMemData->data.Pitch = virtRotX;
-    pMemData->data.Yaw = virtRotY;
-    pMemData->data.Roll = virtRotZ;
+    pMemData->data.X = tx;
+    pMemData->data.Y = ty;
+    pMemData->data.Z = tz;
+    pMemData->data.Yaw = yaw;
+    pMemData->data.Pitch = pitch;
+    pMemData->data.Roll = roll;
 
-    //
-    // Leave some values 0 yet...
-    //
-    pMemData->data.X1 = pMemData->data.DataID + 10;
+    pMemData->data.X1 = ++pMemData->data.DataID;
     pMemData->data.X2 = 0;
     pMemData->data.X3 = 0;
     pMemData->data.X4 = 0;
@@ -170,13 +81,6 @@ float headRotZ;
     pMemData->data.Y3 = 0;
     pMemData->data.Y4 = 0;
 
-    //
-    // Check if the handle that was sent to the Game, was changed (on x64, this will be done by the ED-API)
-    // If the "Report Program Name" command arrives (which is a '1', for now), raise the event from here!
-    //
-    //
-    // The game-ID was changed?
-    //
     if (intGameID != pMemData->GameID)
     {
         QString gamename;
@@ -188,8 +92,7 @@ float headRotZ;
     }
 
 	pMemData->data.DataID += 1;
-    
-    shm.unlock();
+        shm.unlock();
 }
 
 void FTNoIR_Protocol::start_tirviews() {
@@ -218,27 +121,24 @@ void FTNoIR_Protocol::start_tirviews() {
 }
 
 void FTNoIR_Protocol::start_dummy() {
-    QString program = QCoreApplication::applicationDirPath() + "/TrackIR.exe";
-    dummyTrackIR.startDetached("\"" + program + "\"");
 
-    qDebug() << "FTServer::run() says: TrackIR.exe executed!" << program;
+
+    QString program = QCoreApplication::applicationDirPath() + "/TrackIR.exe";
+    dummyTrackIR.setProgram("\"" + program + "\"");
+    dummyTrackIR.start();
 }
 
 bool FTNoIR_Protocol::checkServerInstallationOK()
 {   
 	QSettings settings("Freetrack", "FreetrackClient");							// Registry settings (in HK_USER)
 	QSettings settingsTIR("NaturalPoint", "NATURALPOINT\\NPClient Location");	// Registry settings (in HK_USER)
-	QString aLocation;															// Location of Client DLL
 
-	qDebug() << "checkServerInstallationOK says: Starting Function";
+    if (!shm.success())
+        return false;
 
-    //
-    // Write the path in the registry (for FreeTrack and FreeTrack20), for the game(s).
-    //
-    aLocation =  QCoreApplication::applicationDirPath() + "/";
+    QString aLocation =  QCoreApplication::applicationDirPath() + "/";
 
-    qDebug() << "checkServerInstallationOK says: used interface = " << intUsedInterface;
-    switch (intUsedInterface) {
+    switch (s.intUsedInterface) {
         case 0:									// Use both interfaces
             settings.setValue( "Path" , aLocation );
             settingsTIR.setValue( "Path" , aLocation );
@@ -252,27 +152,16 @@ bool FTNoIR_Protocol::checkServerInstallationOK()
             settingsTIR.setValue( "Path" , aLocation );
             break;
         default:
-            // should never be reached
-        break;
+            break;
     }
 
-    //
-    // TIRViews must be started first, or the NPClient DLL will never be loaded.
-    //
-    if (useTIRViews) {
+    if (s.useTIRViews) {
         start_tirviews();
     }
 
-    //
-    // Check if TIRViews or dummy TrackIR.exe is required for this game
-    //
-    if (useDummyExe) {
-        start_dummy();
-    }
-    
-    if (shm.mem == (void*) 0 || shm.mem == (void*) -1)
-        return false;
-    
+    // more games need the dummy executable than previously thought
+    start_dummy();
+
     pMemData->data.DataID = 1;
     pMemData->data.CamWidth = 100;
     pMemData->data.CamHeight = 250;
@@ -282,16 +171,7 @@ bool FTNoIR_Protocol::checkServerInstallationOK()
 	return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Factory function that creates instances if the Protocol object.
-
-// Export both decorated and undecorated names.
-//   GetProtocol     - Undecorated name, which can be easily used with GetProcAddress
-//                Win32 API function.
-//   _GetProtocol@0  - Common name decoration for __stdcall functions in C language.
-//#pragma comment(linker, "/export:GetProtocol=_GetProtocol@0")
-
-extern "C" FTNOIR_PROTOCOL_BASE_EXPORT IProtocol* CALLING_CONVENTION GetConstructor()
+extern "C" OPENTRACK_EXPORT IProtocol* GetConstructor()
 {
     return new FTNoIR_Protocol;
 }

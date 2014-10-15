@@ -1,224 +1,167 @@
-/*******************************************************************************
-* FaceTrackNoIR    This program is a private project of the some enthusiastic  *
-*                  gamers from Holland, who don't like to pay much for         *
-*                  head-tracking.                                              *
-*                                                                              *
-* Copyright (C) 2012   Wim Vriend (Developing)                                 *
-*                      Ron Hendriks (Researching and Testing)                  *
-*                                                                              *
-* Homepage:        http://facetracknoir.sourceforge.net/home/default.htm       *
-*                                                                              *
-* This program is free software; you can redistribute it and/or modify it      *
-* under the terms of the GNU General Public License as published by the        *
-* Free Software Foundation; either version 3 of the License, or (at your       *
-* option) any later version.                                                   *
-*                                                                              *
-* This program is distributed in the hope that it will be useful, but          *
-* WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY   *
-* or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for  *
-* more details.                                                                *
-*                                                                              *
-* You should have received a copy of the GNU General Public License along      *
-* with this program; if not, see <http://www.gnu.org/licenses/>.               *
-*******************************************************************************/
-#include "tracker.h"
-#include "facetracknoir.h"
+/* Copyright (c) 2012-2013 Stanislaw Halik <sthalik@misaki.pl>
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ */
 
-/** constructor **/
-Tracker::Tracker( FaceTrackNoIR *parent ) :
-    confid(false),
-    should_quit(false),
-    do_center(false)
+/*
+ * this file appeared originally in facetracknoir, was rewritten completely
+ * following opentrack fork.
+ *
+ * originally written by Wim Vriend.
+ */
+
+#include "./tracker.h"
+#include <opencv2/core/core.hpp>
+#include <cmath>
+#include <algorithm>
+
+#if defined(_WIN32)
+#   include <windows.h>
+#endif
+
+Tracker::Tracker(main_settings& s, Mappings &m) :
+    s(s),
+    m(m),
+    centerp(false),
+    enabledp(true),
+    should_quit(false)
 {
-    // Retieve the pointer to the parent
-    mainApp = parent;
-    // Load the settings from the INI-file
-    loadSettings();
 }
 
 Tracker::~Tracker()
 {
+    should_quit = true;
+    wait();
 }
 
-static void get_curve(double pos, double& out, THeadPoseDOF& axis) {
-    bool altp = (pos < 0) && axis.altp;
-    if (altp) {
-        out = axis.invert * axis.curveAlt.getValue(pos);
-        axis.curve.setTrackingActive( false );
-        axis.curveAlt.setTrackingActive( true );
-    }
-    else {
-        out = axis.invert * axis.curve.getValue(pos);
-        axis.curve.setTrackingActive( true );
-        axis.curveAlt.setTrackingActive( false );
-    }
-    out += axis.zero;
+void Tracker::get_curve(double pos, double& out, Mapping& axis) {
+    bool altp = (pos < 0) && axis.opts.altp;
+    axis.curve.setTrackingActive( !altp );
+    axis.curveAlt.setTrackingActive( altp );
+    auto& fc = altp ? axis.curveAlt : axis.curve;
+    out = (axis.opts.invert ? -1 : 1) * fc.getValue(pos);
+
+    out += axis.opts.zero;
 }
 
-/** QThread run method @override **/
+void Tracker::t_compensate(const double* input, double* output, bool rz)
+{
+    static constexpr double pi = 3.141592653;
+    const auto H = input[Yaw] * pi / -180;
+    const auto P = input[Pitch] * pi / -180;
+    const auto B = input[Roll] * pi / 180;
+
+    const auto cosH = cos(H);
+    const auto sinH = sin(H);
+    const auto cosP = cos(P);
+    const auto sinP = sin(P);
+    const auto cosB = cos(B);
+    const auto sinB = sin(B);
+
+    double foo[] = {
+        cosH * cosB - sinH * sinP * sinB,
+        - sinB * cosP,
+        sinH * cosB + cosH * sinP * sinB,
+        cosH * sinB + sinH * sinP * cosB,
+        cosB * cosP,
+        sinB * sinH - cosH * sinP * cosB,
+        - sinH * cosP,
+        - sinP,
+        cosH * cosP,
+    };
+
+    const cv::Matx33d rmat(foo);
+    const cv::Vec3d tvec(input);
+    const cv::Vec3d ret = rmat * tvec;
+
+    const int max = !rz ? 3 : 2;
+
+    for (int i = 0; i < max; i++)
+        output[i] = ret(i);
+}
+
 void Tracker::run() {
-    T6DOF current_camera;  // Used for filtering
-    T6DOF target_camera;
-    T6DOF new_camera;
-    
-    /** Direct Input variables **/
-    T6DOF offset_camera;
-    T6DOF gameoutput_camera;
-    
-    bool bTracker1Confid = false;
-    bool bTracker2Confid = false;
-    
-    double newpose[6];
-    double last_post_filter[6];
-    
-    forever
+    Pose pose_offset, unstopped_pose;
+
+    double newpose[6] = {0};
+    const int sleep_ms = 3;
+
+#if defined(_WIN32)
+    (void) timeBeginPeriod(1);
+#endif
+
+    while (!should_quit)
     {
-        if (should_quit)
-            break;
+        t.start();
+
+        Libraries->pTracker->GetHeadPoseData(newpose);
+
+        Pose final_raw, filtered;
 
         for (int i = 0; i < 6; i++)
-            newpose[i] = 0;
-
-        //
-        // The second tracker serves as 'secondary'. So if an axis is
-        // written by the second tracker it CAN be overwritten by the
-        // Primary tracker. This is enforced by the sequence below.
-        //
-        if (Libraries->pSecondTracker) {
-            bTracker2Confid = Libraries->pSecondTracker->GiveHeadPoseData(newpose);
-        }
-
-        if (Libraries->pTracker) {
-            bTracker1Confid = Libraries->pTracker->GiveHeadPoseData(newpose);
+        {
+            auto& axis = m(i);
+            int k = axis.opts.src;
+            if (k < 0 || k >= 6)
+                continue;
+            // not really raw, after axis remap -sh
+            final_raw(i) = newpose[k];
         }
 
         {
-            QMutexLocker foo(&mtx);
-            confid = bTracker1Confid || bTracker2Confid;
+            if (enabledp)
+                unstopped_pose = final_raw;
+
+            if (Libraries->pFilter)
+                Libraries->pFilter->FilterHeadPoseData(unstopped_pose, filtered);
+            else
+                filtered = unstopped_pose;
             
-            if ( confid ) {
-                for (int i = 0; i < 6; i++)
-                    mainApp->axis(i).headPos = newpose[i];
+            if (centerp)  {
+                centerp = false;
+                pose_offset = filtered;
             }
-            
-            //
-            // If Center is pressed, copy the current values to the offsets.
-            //
-            if (do_center)  {
-                //
-                // Only copy valid values
-                //
-                if (confid) {
-                    for (int i = 0; i < 6; i++)
-                        offset_camera.axes[i] = mainApp->axis(i).headPos;
-                }
-                
-                Tracker::do_center = false;
-                
-                if (Libraries->pTracker)
-                    Libraries->pTracker->NotifyCenter();
-                
-                if (Libraries->pSecondTracker)
-                    Libraries->pSecondTracker->NotifyCenter();
-                
-                if (Libraries->pFilter)
-                    Libraries->pFilter->Initialize();
-            }
-            
-            if (getTrackingActive()) {
-                // get values
-                for (int i = 0; i < 6; i++)
-                    target_camera.axes[i] = mainApp->axis(i).headPos;
-                
-                // do the centering
-                target_camera = target_camera - offset_camera;
-                
-                //
-                // Use advanced filtering, when a filter was selected.
-                //
-                if (Libraries->pFilter) {
-                    for (int i = 0; i < 6; i++)
-                        last_post_filter[i] = gameoutput_camera.axes[i];
-                    Libraries->pFilter->FilterHeadPoseData(current_camera.axes, target_camera.axes, new_camera.axes, last_post_filter);
-                }
-                else {
-                    new_camera = target_camera;
-                }
-                
-                for (int i = 0; i < 6; i++) {
-                    get_curve(new_camera.axes[i], output_camera.axes[i], mainApp->axis(i));
-                }
-                
-                //
-                // Send the headpose to the game
-                //
-                if (Libraries->pProtocol) {
-                    gameoutput_camera = output_camera;
-                    Libraries->pProtocol->sendHeadposeToGame( gameoutput_camera.axes, newpose );  // degrees & centimeters
-                }
-            }
+
+            filtered = filtered & pose_offset;
+
+            for (int i = 0; i < 6; i++)
+                get_curve(filtered(i), filtered(i), m(i));
         }
-        
-        //For 60fps processing rate.
-        msleep(16);
+
+        if (s.tcomp_p)
+            t_compensate(filtered, filtered, s.tcomp_tz);
+
+        Libraries->pProtocol->sendHeadposeToGame(filtered);
+
+        {
+            QMutexLocker foo(&mtx);
+            output_pose = filtered;
+            raw_6dof = final_raw;
+        }
+
+        const long q = 1000L * std::max(0L, sleep_ms - t.elapsed_ms());
+        usleep(q);
     }
+
+#if defined(_WIN32)
+    (void) timeEndPeriod(1);
+#endif
 
     for (int i = 0; i < 6; i++)
     {
-        mainApp->axis(i).curve.setTrackingActive(false);
-        mainApp->axis(i).curveAlt.setTrackingActive(false);
+        m(i).curve.setTrackingActive(false);
+        m(i).curveAlt.setTrackingActive(false);
     }
 }
 
-//
-// Get the raw headpose, so it can be displayed.
-//
-void Tracker::getHeadPose( double *data ) {
-    QMutexLocker foo(&mtx);
+void Tracker::get_raw_and_mapped_poses(double* mapped, double* raw) const {
+    QMutexLocker foo(&const_cast<Tracker&>(*this).mtx);
     for (int i = 0; i < 6; i++)
     {
-        data[i] = mainApp->axis(i).headPos;
+        raw[i] = raw_6dof(i);
+        mapped[i] = output_pose(i);
     }
 }
 
-//
-// Get the output-headpose, so it can be displayed.
-//
-void Tracker::getOutputHeadPose( double *data ) {
-    QMutexLocker foo(&mtx);
-    for (int i = 0; i < 6; i++)
-        data[i] = output_camera.axes[i];
-}
-
-//
-// Load the current Settings from the currently 'active' INI-file.
-//
-void Tracker::loadSettings() {
-    qDebug() << "Tracker::loadSettings says: Starting ";
-    QSettings settings("opentrack");  // Registry settings (in HK_USER)
-
-    QString currentFile = settings.value(
-        "SettingsFile",
-        QCoreApplication::applicationDirPath() + "/Settings/default.ini").toString();
-    QSettings iniFile(currentFile, QSettings::IniFormat);  // Application settings (in INI-file)
-
-    iniFile.beginGroup("Tracking");
-    
-    qDebug() << "loadSettings says: iniFile = " << currentFile;
-    
-    const char* names2[] = {
-        "zero_tx",
-        "zero_ty",
-        "zero_tz",
-        "zero_rx",
-        "zero_ry",
-        "zero_rz"
-    };
-    
-    for (int i = 0; i < 6; i++)
-        mainApp->axis(i).zero = iniFile.value(names2[i], 0).toDouble();
-    
-    iniFile.endGroup();
-}
-
-void Tracker::setInvertAxis(Axis axis, bool invert) { mainApp->axis(axis).invert = invert?-1.0f:1.0f; }
